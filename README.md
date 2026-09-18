@@ -45,6 +45,41 @@ before relying on this assessment as capabilities and preview status evolve.
 [grounding-data-compromise]: https://learn.microsoft.com/security/zero-trust/catalog-ai-attack-techniques/grounding-data-compromise
 [training-data-poisoning]: https://learn.microsoft.com/security/zero-trust/catalog-ai-attack-techniques/training-data-poisoning
 
+## Does pinpointing an anomaly require agentic orchestration?
+
+**Not for detecting and locating suspicious data.** Explaining its cause across
+systems requires a broader investigation workflow, but that workflow does not
+necessarily require an LLM or multiple agents.
+
+| Level | What it establishes | What this repository provides |
+| --- | --- | --- |
+| Detect and localize | A supplied embedding is an outlier, particular rows have unusual spectral scores, or a feature's distribution has shifted. | Numerical detectors and calibration guidance. Callers must retain the mapping from row positions to stable source IDs and versions. |
+| Diagnose and attribute | Whether a signal originated in source content, label changes, preprocessing, an embedding-model upgrade, or an unauthorized write. | Connectors and lineage-recording building blocks, not automatic cross-service root-cause tracing. Diagnosis needs trusted references and correlation across provenance, dataset versions, transformations, and audit logs. |
+| Respond | Whether to hold a batch, rebuild an index, roll back a transformation, or release a false positive. | Review recommendations, not automatic remediation. Operational workflows, evidence preservation, and approvals must be supplied by the integrating application. |
+
+Mahalanobis distance, k-NN, and singular value decomposition (SVD) are numerical
+computations; they do not need an LLM to execute them. A conventional ingestion
+or batch-audit pipeline can run the detectors, preserve the source IDs associated
+with candidates, record evidence, and route findings to an existing review queue.
+Semantic content screening uses the configured embedding service, but likewise
+does not require multi-agent orchestration.
+
+Agentic orchestration becomes useful when the investigation path is uncertain:
+choosing which evidence to retrieve, following lineage across services, comparing
+competing explanations, and producing a diagnosis supported by cited evidence.
+An investigating agent should use the detectors as tools rather than substitute
+its own judgment for numerical scores. It must treat suspect documents and tool
+results as untrusted data, stay within authorized access, and keep consequential
+write actions behind approval.
+
+**A statistical anomaly is not proof of poisoning.** Legitimate drift or a
+correlated subpopulation can produce the same signal. An agent cannot establish
+malicious causation without corroborating evidence, and orchestration cannot
+compensate for missing provenance or an untrusted baseline.
+
+This skill supplies **detection and investigation components, not an autonomous
+poisoning-investigation system**.
+
 ## Use the skill
 
 Copilot discovers the repository's `SKILL.md` and loads it when relevant. For
