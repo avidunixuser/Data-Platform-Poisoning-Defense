@@ -1,0 +1,8 @@
+-r requirements.txt
+openai>=2.0,<3
+azure-identity>=1.17,<2
+azure-cosmos>=4.7,<5
+azure-search-documents>=11.5,<12
+azure-kusto-data>=5.0,<7
+psycopg2-binary>=2.9,<3
+pyodbc>=5.0,<6
