@@ -95,6 +95,96 @@ Windows, the corresponding location is
 `$HOME\.copilot\skills\retrieval-poisoning-defense`. This repository does not
 install anything globally or grant tools automatic approval.
 
+### Is the skill itself called as a tool?
+
+**The skill is an instruction-and-resource package, not a standalone audit API
+or MCP tool.** A skill-aware host loads `SKILL.md` and makes its supporting
+resources available to the agent. Some hosts expose that loading mechanism as a
+tool or command; invoking the loader supplies guidance, not a completed audit.
+
+The agent then **calls execution tools to do the work**: for example, an
+authorized Python/shell tool running code that imports and calls the bundled
+detectors and connectors. Another runtime can expose those Python APIs through
+explicitly registered function tools. The skill explains when and how to use
+them; the tools perform the reads and computations.
+
+```text
+User request + skill instructions + approved workload context
+    -> authorized execution tool
+    -> Python connectors and detectors
+    -> structured evidence
+    -> agent explanation and review recommendation
+```
+
+This repository does not deploy an MCP server or automatically register a
+Foundry tool. For a custom or Foundry agent, make the instructions available and
+provide an approved execution/tool layer, dependencies, configuration, and
+scoped access. Cloning the repository or adding its text to a prompt does not
+grant datastore access or start continuous monitoring. The Python APIs can also
+run in a conventional pipeline without an agent.
+
+### How an agent uses context to detect anomalies
+
+1. **Load the playbook.** Match the request to the skill, read `SKILL.md`, and
+   consult the relevant threat-model, calibration, and connector references.
+   Reading these instructions alone does not detect poisoning.
+2. **Establish the workload context.** Identify the approved source and batch or
+   time window, schema, downstream data role, category/label definitions,
+   embedding model/version/dimension, feature preprocessing, and source IDs.
+   Obtain independently trusted fitting and held-out calibration data where
+   applicable. Ask for missing information rather than treating the suspect
+   batch as its own clean baseline. Conversation history and pretrained model
+   knowledge are not substitutes for a trusted reference.
+3. **Load bounded data and execute the detectors.** Use approved read-only
+   queries and explicit vector decoding; verify schema, dimensions, and numeric
+   validity. Run all applicable detector layers with calibrated thresholds.
+   Compute distances and SVD in Python, not by asking the LLM to inspect arrays
+   in its prompt. Obtain authorization before semantic screening sends text to
+   the configured Azure embedding endpoint.
+4. **Map evidence back to records.** Collect flags, measured scores, thresholds,
+   reason codes, candidate row positions, affected classes/features, and
+   unavailable checks. Preserve the caller's mapping to stable source IDs,
+   versions, and batch lineage. Tabular candidate positions are zero-based
+   positions for `df.iloc`, not business IDs or DataFrame index labels.
+5. **Explain and record the outcome.** Report which signals triggered, what
+   context supports them, and what remains unassessed. Record approved batch
+   metadata and result summaries without raw document bodies or credentials.
+   Errors, missing required checks, or partial results mean not evaluated/hold,
+   never "clean". Actual quarantine or remediation belongs to a separately
+   authorized application workflow.
+
+The context is different for each detector:
+
+| Data role | Context the detector uses |
+| --- | --- |
+| Embeddings | Trusted category distributions, held-out calibration vectors, matching model/preprocessing, and optionally representative query embeddings. Without a query bank, reference document vectors are only a proxy for query similarity. |
+| Free-text documents or logs | Recognizable instruction/Unicode patterns and a small embedding-based bank of known injection examples. This is not a factual knowledge base or a test of document truthfulness. |
+| Labeled training rows | Feature-space neighborhoods and within-class spectral structure, with trusted feature preprocessing and calibrated thresholds. These checks use relationships within the batch; they do not independently establish correct labels. |
+| New telemetry or feature batches | A trusted reference window with comparable workload, seasonality, sampling, and preprocessing for distribution-drift comparison. |
+
+### Example: audit a new product-document embedding
+
+An example request with explicit scope is:
+
+> Use retrieval-poisoning-defense to audit approved batch B-104 in our product
+> document store against approved reference R-12. Keep source access read-only.
+> Report document IDs, reference/model versions, scores, thresholds, reasons,
+> and any checks that could not run.
+
+After resolving the approved data and verifying its metadata, the agent calls
+`EmbeddingAnomalyDetector.fit_reference(...)`, then
+`detector.score(new_embedding, category="product_docs")` for each candidate.
+If a calibrated distance or similarity check flags an item, the agent associates
+that result with its original document ID and reports the supporting evidence
+for review. It does not infer an attacker's intent from the score.
+
+Distinguishing poisoning from a legitimate new topic, incorrect category
+metadata, or an embedding-model change requires corroboration. With additional
+authorized tools, an agent could inspect transformation history or writer audit
+logs; this repository does not discover that history automatically. Suspect
+documents and tool results remain untrusted data, never instructions to the
+investigating agent.
+
 ## Included components
 
 | Component | Purpose |
