@@ -52,9 +52,20 @@ class SkillPackageTests(unittest.TestCase):
             ("reference", "detection_calibration.md"),
             ("reference", "data_connectors.md"),
             ("reference", "service_integration.md"),
+            ("reference", "enforcement_and_scaling.md"),
         ):
             with self.subTest(name=name):
                 self.assertTrue((SKILL_ROOT / folder / name).is_file())
+
+    def test_enforcement_modes_are_discoverable(self) -> None:
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        reference_path = Path("reference") / "enforcement_and_scaling.md"
+        self.assertIn(f"]({reference_path.as_posix()})", skill)
+        reference = (SKILL_ROOT / reference_path).read_text(encoding="utf-8")
+        for mode in ("post_write_audit", "inline_gate", "async_gate"):
+            with self.subTest(mode=mode):
+                self.assertIn(f"`{mode}`", skill)
+                self.assertIn(f"`{mode}`", reference)
 
     def test_python_modules_parse(self) -> None:
         for source in (SKILL_ROOT / "scripts").glob("*.py"):
