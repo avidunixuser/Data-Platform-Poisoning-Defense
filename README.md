@@ -80,6 +80,36 @@ compensate for missing provenance or an untrusted baseline.
 This skill supplies **detection and investigation components, not an autonomous
 poisoning-investigation system**.
 
+## Post-write flagging, interception, and asynchronous scale
+
+The skill guides three integration options. **It does not install a write
+interceptor:** a trusted application service must enforce any pre-write policy
+outside the proposing agent's discretion.
+
+| Mode | Behavior | Client and visibility contract |
+| --- | --- | --- |
+| `post_write_audit` | Inspect committed versions and record flags asynchronously | Existing write response is unchanged; data may already be exposed before detection |
+| `inline_gate` | Run all required checks in a mandatory write service before committing | Caller waits for validation and write outcome; failures or incomplete checks do not allow the write |
+| `async_gate` | Durably stage a candidate, validate through a worker pool, and publish only after approval | Return `202 Accepted` and an operation/status reference promptly; acceptance is not commit, and pending data stays out of serving/training paths |
+
+Prefer asynchronous gating when clients should not wait for expensive detection
+but unvalidated data must not become production-visible. A client still waits for
+durable acceptance and observes the final outcome separately. Writing directly
+to production and checking later is post-write auditing, not async prevention.
+
+For scale, use a bounded **Python validation worker pool**, with a separate,
+optional **agent pool** for investigating held cases. Reuse versioned references
+and seed embeddings; size pools from measured service time and queue age/depth,
+within embedding and database quotas. Preserve detector cohorts when batching,
+and use idempotency, bounded retries, dead-letter handling, and backpressure.
+Do not solve overload by dropping checks or allowing unchecked writes.
+
+See [enforcement modes and scaling](.github/skills/retrieval-poisoning-defense/reference/enforcement_and_scaling.md)
+for the staging/status contract, publication safeguards, sizing method, and
+failure scenarios. Gateways, queues, pools, status endpoints, and distributed
+audit storage described there are integration work, not runtime features already
+provided by this repository.
+
 ## Use the skill
 
 Copilot discovers the repository's `SKILL.md` and loads it when relevant. For
