@@ -59,6 +59,11 @@ Read [enforcement modes and scaling](reference/enforcement_and_scaling.md) befor
 designing a write path. The following names are architectural choices, **not
 parameters to the existing scripts or deployed gateway features**.
 
+For Microsoft Foundry deployment planning, read the
+[implementation and private-network guide](reference/foundry_implementation.md)
+for service dependencies, MCP/A2A integration, network lockdown, and identity
+boundaries. These instructions do not authorize deployment or role changes.
+
 | Mode | Processing and client contract | Protection boundary |
 | --- | --- | --- |
 | `post_write_audit` | Audit committed versions from approved change capture or periodic reads; persist flags and notify reviewers asynchronously. | Detective only: data can be consumed before it is flagged. Do not claim the write was prevented. |

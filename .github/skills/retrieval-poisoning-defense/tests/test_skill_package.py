@@ -53,6 +53,7 @@ class SkillPackageTests(unittest.TestCase):
             ("reference", "data_connectors.md"),
             ("reference", "service_integration.md"),
             ("reference", "enforcement_and_scaling.md"),
+            ("reference", "foundry_implementation.md"),
         ):
             with self.subTest(name=name):
                 self.assertTrue((SKILL_ROOT / folder / name).is_file())
@@ -66,6 +67,16 @@ class SkillPackageTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 self.assertIn(f"`{mode}`", skill)
                 self.assertIn(f"`{mode}`", reference)
+
+    def test_foundry_implementation_is_discoverable(self) -> None:
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        reference_path = Path("reference") / "foundry_implementation.md"
+        self.assertIn(f"]({reference_path.as_posix()})", skill)
+        self.assertTrue((SKILL_ROOT / reference_path).is_file())
+        guide = (SKILL_ROOT / reference_path).read_text(encoding="utf-8")
+        steps = [int(step) for step in re.findall(r"^## (\d+)\.", guide, re.MULTILINE)]
+        self.assertTrue(steps)
+        self.assertEqual(steps, list(range(1, len(steps) + 1)))
 
     def test_python_modules_parse(self) -> None:
         for source in (SKILL_ROOT / "scripts").glob("*.py"):
