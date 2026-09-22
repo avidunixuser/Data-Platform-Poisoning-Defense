@@ -110,6 +110,14 @@ failure scenarios. Gateways, queues, pools, status endpoints, and distributed
 audit storage described there are integration work, not runtime features already
 provided by this repository.
 
+## Implementing on Microsoft Foundry
+
+The [Foundry implementation and private-network guide](.github/skills/retrieval-poisoning-defense/reference/foundry_implementation.md)
+describes the service footprint, build sequence, MCP/A2A boundaries, private
+networking and DNS, managed-identity permissions, and acceptance/cutover checks.
+It is a deployment design reference, not provisioned infrastructure or a claim
+that every private-network combination has been validated in a live environment.
+
 ## Use the skill
 
 Copilot discovers the repository's `SKILL.md` and loads it when relevant. For
