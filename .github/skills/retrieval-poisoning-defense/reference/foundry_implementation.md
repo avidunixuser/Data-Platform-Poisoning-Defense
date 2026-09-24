@@ -1,7 +1,7 @@
 # Microsoft Foundry implementation and private-network guide
 
-**Architecture guidance; networking/identity documentation reviewed 2026-09-21;
-model-routing documentation reviewed 2026-09-24.** This is not deployable IaC or
+**Architecture guidance; base networking/identity documentation reviewed 2026-09-21;
+model-routing and agent-memory guidance reviewed 2026-09-24.** This is not deployable IaC or
 evidence of a live network/RBAC/model-router validation. The repository
 contains detectors and instructions, not the API, MCP server, queue processors,
 publication service, or Azure infrastructure described below. Obtain approval
@@ -15,6 +15,11 @@ single-region model inference; see [model-routing residency](#model-routing-for-
 See [enforcement and scaling](enforcement_and_scaling.md)
 for the post-write and inline alternatives, state machine, and failure handling.
 Do not silently substitute post-write detection for pre-publication enforcement.
+
+For the UI/API, local write-gate prototype, presentation scenarios, and staged
+Azure deployment workflow, use the
+[demonstration implementation guide](demo_implementation.md).
+It identifies the application and deployment assets that still need to be built.
 
 ## 1. Confirm the implementation contract
 
@@ -44,12 +49,12 @@ It is not ten resource instances or a complete private-network bill of materials
 | # | Service family | Implementation responsibility |
 | --- | --- | --- |
 | 1 | Microsoft Foundry | Proposing/investigating agents, model and embedding deployments, optional model-router chat deployments, project connections, and optional toolboxes/A2A endpoints |
-| 2 | Azure Container Apps | Separate intake/status/MCP, validation-worker, and trusted-publisher workloads and identities |
+| 2 | Azure Container Apps | Separate intake/status/MCP, agent-memory API, validation-worker, and trusted-publisher workloads and identities |
 | 3 | Azure Container Registry | Versioned images for those workloads; private image-pull and build paths |
 | 4 | Azure API Management | Governed API entry point and, where the selected route supports it, REST-to-MCP exposure |
 | 5 | Azure Service Bus | Validation/publication work queues, bounded consumers, retries, and dead-letter handling |
 | 6 | Azure Blob Storage | Isolated candidate staging, immutable trusted reference artifacts, and retained evidence |
-| 7 | Azure Cosmos DB for NoSQL | Separately permissioned admission/outbox, validation-decision, and publication-receipt data; an approved SQL design could substitute |
+| 7 | Azure Cosmos DB for NoSQL | Isolated application memory for every AI agent, separate from Foundry-managed state and admission/decision/receipt ledgers; SQL is only an alternative for the operation ledger, not this design's memory store |
 | 8 | Azure Monitor | Application Insights, Log Analytics, diagnostic settings, and private telemetry connectivity where required |
 | 9 | Microsoft Entra ID | Caller/service authentication, managed identities, application roles, and privileged deployment governance |
 | 10 | Azure AI Search | Required backing service for the secured Standard Foundry setup, even if the poisoning-defense application has no Search target |
@@ -65,6 +70,13 @@ do not place the gate's protected decisions in that account. Multiple accounts
 of one product still count as one service family. Existing protected business
 datastores are separate targets, not a requirement to deploy all six.
 
+Cosmos-backed agent memory adds containers and potentially a separate account,
+not a new service family. Keep it separate from platform-owned Foundry state,
+trusted reference artifacts, and the gate's authorization/decision records.
+All application agents use the [scoped memory contract](#cosmos-db-memory-for-every-ai-agent);
+sharing the storage technology does not grant agents access to each other's
+sessions or every tenant's history.
+
 At the application layer, keep this flow independent of agent reasoning:
 
 ```text
@@ -75,6 +87,9 @@ Authorized client / Foundry agent
   -> conditional target write -> protected receipt / status
 
 Held cases -> authorized reviewer / optional investigation agent or A2A peer
+
+Registered AI agents -> scoped memory API -> approved Cosmos memory
+                    -> memory proposals -> gate -> memory publisher -> Cosmos
 ```
 
 ## 3. Build and lock down the private network
@@ -285,6 +300,9 @@ roles where the actual operations permit it.
 | MCP/API facade | Custom application permissions for approved submission, investigation, or status operations; add datastore rights only when explicitly required by its implementation | Generic SQL/shell access, arbitrary target connections, approval-store mutation, and publisher credentials |
 | APIM backend identity | The backend API's explicitly defined application permission and correct token audience | Direct business-database access or implicit authority to act as every end user |
 | Foundry agent callers | Approved custom proposal/investigation API permissions for the actual agent principal or selected project MI | Direct mutation of production data, reference artifacts, decisions, or receipts |
+| Agent-memory read API | Native `Cosmos DB Built-in Data Reader` on assigned serving-memory containers; application authorization on every recall | Memory publication, gate-decision mutation, and unfiltered cross-agent/tenant queries |
+| Agent-memory proposal API | Custom `Memory.Propose` permission into the approved intake path, or intake-scoped rights on isolated memory candidates if intentionally colocated | Direct changes to serving memory or approval records |
+| Trusted memory publisher | Publication-queue receive, protected-decision read, and native Cosmos data-write rights only on its assigned memory containers and receipt scope | Business-target write credentials, authoring its own validation decision, or changing another isolation domain |
 | Application invoking a Foundry agent | `Foundry Agent Consumer` at the intended agent scope where supported | Agent/project management merely to invoke an endpoint |
 | Telemetry emitter or collector | `Monitoring Metrics Publisher` on the specific Application Insights resource when using its Entra-authenticated ingestion path | Monitoring administration or an assumption that one role covers every logging/export mechanism |
 
@@ -454,6 +472,164 @@ target version immediately before the write. Use the target's supported
 conditional/transactional operation; do not claim a transaction across all
 datastores. Preserve uncertain outcomes as `reconciling`, not failed/succeeded
 guesses, and reconcile redelivery before applying a mutation again.
+
+### Cosmos DB memory for every AI agent
+
+Use **Azure Cosmos DB for NoSQL as the durable application-memory store for all
+registered AI agents**: proposing/coordinating agents, investigators, and approved
+A2A specialists. Give each agent an authenticated memory capability and scope,
+not unrestricted access to one global conversation. Ordinary numerical workers
+need operation state and references, not an LLM memory of their own.
+
+This is an application integration to build. Foundry's supported BYO Cosmos
+backing state remains platform-managed. Do not read/write internal Foundry
+containers as if they were a stable custom-memory API, duplicate every managed
+conversation automatically, or claim this gate intercepts Foundry's internal
+state writes. Configure supported native conversation storage separately.
+The custom memory API below controls only what the application stores and
+retrieves through that API.
+
+For third-party/A2A agents, require an authorized adapter and explicit memory
+sharing agreement; configuring A2A does not automatically persist or share their
+internal context. An agent without a supported scoped-memory path is not ready
+for the all-agents-memory deployment profile.
+
+#### Separate stores, access scopes, and memory types
+
+Use a dedicated custom-memory account when platform identities or the operation
+ledger otherwise need broad account rights. At minimum, independently permission
+memory candidates, serving memories, optional shared-case memories, and gate
+decisions/receipts. Never put all of them in an intake-writable container.
+
+| Memory class | Contents and scope | Lifetime and trust |
+| --- | --- | --- |
+| Session memory | Minimized approved turns, task summaries, and evidence references for one tenant/agent/user-session | Bounded retention; not a complete raw-prompt or hidden-reasoning log |
+| Long-term memory | Consented preferences, reviewed observations, and versioned summaries within a defined user/case scope | Explicit expiry/review policy; generated assertions are not verified facts merely because they were stored |
+| Shared-case memory | Explicitly published summaries/evidence for named collaborating agents | Deny by default; verify case membership and original data access at recall time |
+| Gate and audit state | Admission, decision, publication, and idempotency records | Not conversational memory; separate retention, roles, and authoritative state |
+
+Create an agent registry mapping validated caller principals to allowed agent
+IDs, tenant/owner scopes, containers, policy versions, and permitted operations.
+Use illustrative custom API permissions such as `Memory.Read`, `Memory.Propose`,
+and a separately governed sharing/revocation permission. These are application
+roles to implement, not built-in Azure roles or automatically registered tools.
+
+Derive identity/scope from authenticated claims and server-owned mappings.
+Do not accept a supplied `agent_id`, `tenant_id`, thread ID, or container name as
+authorization. Validate session ownership, user/case membership, and source ACLs
+for point reads, queries, vector searches, exports, and cache hits.
+
+Partition for workload locality, for example with a server-derived
+tenant/agent/owner/session scope key. The exact key needs workload sizing;
+avoid one hot partition for every agent. **A partition key or a `WHERE` filter
+is not a Cosmos RBAC boundary.** Native role scopes protect account/database/
+container access. Pooled finer-grained isolation requires trusted API enforcement;
+use separately scoped containers/accounts and identities where stronger isolation
+is required. Do not grant agents direct broad Cosmos access around that API.
+
+An application-owned memory record should include:
+
+| Fields | Purpose |
+| --- | --- |
+| Stable ID, operation ID, schema/version, content hash | Replay, idempotency, and exact-version association |
+| Tenant, agent, owner, session/case, memory type, sharing scope | Server-established access and retrieval boundaries |
+| Minimized content and source/evidence references | Useful recall with provenance; no credentials or privileged instruction configuration |
+| Created/expiry times and retention policy | Explicit lifecycle rather than indefinite retention by default |
+| Generation model/transform and evaluation-policy versions | Provenance for derived summaries and observations |
+| Embedding model/version/dimension, if semantic recall is enabled | Compatible indexing and retrieval, separate from chat-model routing |
+
+#### Gate memory writes and treat recalled content as untrusted
+
+Agents call a bounded `propose_memory` operation and receive an operation
+reference. Candidate data follows the same authenticated staging, mandatory
+content/privacy checks, and version-bound decision flow as other protected
+writes. A dedicated memory-publisher identity publishes approved content;
+the proposing agent and read API cannot do so directly. Configure applicable
+checks for the memory type; do not claim that unlabeled text received label-flip
+analysis or that a missing baseline passed a vector check.
+
+Serve only the approved exact version after checking current access, expiry,
+revocation, and source scope. Candidate storage is inaccessible to recall.
+The API should offer bounded operations such as `recall_memory` and
+`get_memory_status`, not arbitrary NoSQL. This contract is common to all agent
+adapters, regardless of their underlying LLM.
+
+Recalled memory is supporting data, never new system/developer authority.
+Preserve origin and evidence links when composing the agent context; do not
+restore a stored role string as an executable privileged message. A summary
+derived from untrusted content remains untrusted. Do not let repetition or
+an agent's own confidence label promote a statement into a verified fact.
+
+If required recall or publication fails, report the failure and suspend the
+dependent operation. An explicitly allowed stateless interaction can continue
+with a visible "memory unavailable" state, but must not manufacture recalled
+facts, silently read another namespace, or claim the memory write succeeded.
+Pending memory writes are not immediately available to the next turn.
+
+#### Concurrency, retention, and semantic retrieval
+
+Use conditional replacements with `_etag`/If-Match for mutable summaries.
+On conflict, reread, recompute, and reevaluate the new proposal rather than
+blindly overwrite. Use immutable versions where practical and retain their
+source linkage. Cosmos transactional batches cover a container's logical
+partition, not arbitrary memory containers, Blob, or Service Bus.
+
+Select a consistency/read-after-write contract for the memory API. Separate
+publisher/reader processes do not automatically share a session token. Carry
+the needed consistency context server-side or verify the expected committed
+version before claiming that recall sees it; do not expose tokens in logs.
+
+Enable TTL at the container level and configure approved per-class durations.
+Cosmos TTL is measured from the last modification; updates can extend its
+countdown, and item TTL has no effect if container TTL is disabled. For an
+absolute retention limit, enforce `expires_at` during every read/cache hit and
+recalculate remaining TTL on updates. Expired query results disappear before
+background physical deletion necessarily finishes.
+
+Handle deletion/revocation across derived summaries, vectors, caches, evidence
+copies, and restored backups under a separate retention policy. Do not claim
+TTL instantly erases backups or provides a compliance guarantee. Retain gate
+receipts/idempotency records for their required recovery window independently
+of conversational TTL.
+
+Start with bounded session/case reads. Add Cosmos vector/full-text indexes only
+when semantic recall is needed and approved; it is not required simply to store
+memory. Keep memory embeddings model-compatible and apply scope controls to
+semantic queries too. Model Router may change the LLM creating a summary, not
+the embedding space on each request. Version/cache records by tenant, agent,
+owner, policy, source, model, and expiry; invalidate changes and revocations.
+Monitor RU use, throttling, partition skew, recall latency, and stored-data size.
+
+The Microsoft Agent Memory Toolkit is an optional **preview** integration.
+Review its storage/processing behavior before adoption; neither that toolkit nor
+its automated writes are added by this guide. It must not bypass the publication
+and access boundaries above. A plain reviewed Cosmos SDK adapter is sufficient
+for the initial application contract.
+
+#### Deploy the memory boundary privately
+
+Provision the memory account/containers and assigned runtime identities before
+enabling agent memory. Use an approved `Sql` private endpoint with
+`privatelink.documents.azure.com` records and canonical account hostname;
+configure DNS for the memory API/publisher runtime and every enabled region.
+Set `publicNetworkAccess=Disabled` and `disableLocalAuth=true` for the chosen
+keyless private profile after verifying the migration/provisioning path.
+Public DNS resolution alone is not proof of public data access.
+
+Use explicit managed-identity credentials and native data roles at the intended
+container scopes. The read service receives Data Reader; memory candidates and
+serving memory have different write identities. Prefer reviewed custom actions
+where Contributor is broader than necessary. Memory service endpoints require
+the API's Entra audience/application roles in addition to their private route.
+The browser and agent receive neither a Cosmos key nor a bypassing write tool.
+
+Sources: [Cosmos agent-memory patterns](https://learn.microsoft.com/azure/cosmos-db/gen-ai/agentic-memories),
+[Agent Memory Toolkit preview](https://learn.microsoft.com/azure/cosmos-db/gen-ai/agent-memory-toolkit),
+[native data-plane roles](https://learn.microsoft.com/azure/cosmos-db/reference-data-plane-security),
+[conditional writes](https://learn.microsoft.com/azure/cosmos-db/database-transactions-optimistic-concurrency),
+[TTL semantics](https://learn.microsoft.com/azure/cosmos-db/time-to-live),
+[Cosmos Private Link](https://learn.microsoft.com/azure/cosmos-db/how-to-configure-private-endpoints),
+and [keyless RBAC configuration](https://learn.microsoft.com/azure/cosmos-db/how-to-connect-role-based-access-control).
 
 ## 6. Package and scale the application workloads
 
@@ -648,6 +824,11 @@ Suggested domain tools are `submit_candidate`, `audit_committed_batch`,
 `get_operation_status`, `get_findings`, and `request_review`. These names describe
 APIs to implement, not existing tools supplied by this repository.
 
+Give every participating AI agent scoped `recall_memory`/`propose_memory`
+capabilities through the approved adapter, with separate permissions for sharing
+and retention actions. All such calls obey the Cosmos memory boundary; a peer
+cannot gain another agent's memory access merely by participating in A2A.
+
 Expose only bounded schemas and approved source/target catalog entries.
 Do not expose arbitrary SQL, shell execution, a generic database writer, or a
 caller-controlled connection string to the proposing agent. A tool allowlist or
@@ -734,6 +915,7 @@ expected outcome, and actual outcome without logging credentials or raw data.
 | Identity denial | From an allowed private network, a valid wrong-role/wrong-tenant/wrong-audience identity cannot perform the protected operation. |
 | Write separation | Proposing agents, intake, and validators cannot write production data; intake and investigators cannot forge approval or commit receipts. |
 | Reference integrity | Runtime producers cannot modify trusted reference/model-policy artifacts. Unapproved versions cannot be substituted through request metadata. |
+| Agent memory | Each registered agent can recall only authorized, approved, unexpired memory; cross-agent/tenant access and forged publication are denied. Restart, concurrent-update, TTL, revocation, and backup-restore handling preserve those boundaries. |
 | Gate behavior | Flagged or incompletely evaluated candidates stay unpublished; staged data cannot appear in retrieval, analytics, or training. |
 | Asynchronous recovery | Durable acceptance survives restart; duplicates, stale versions, expired leases, and commit-before-ack crashes do not create duplicate or unapproved effects. |
 | Network failure | DNS, private endpoint, route, or embedding connectivity failures produce explicit pending/held/failed or reconciling status, not fail-open publication. |

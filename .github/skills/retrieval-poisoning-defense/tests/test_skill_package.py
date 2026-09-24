@@ -54,6 +54,7 @@ class SkillPackageTests(unittest.TestCase):
             ("reference", "service_integration.md"),
             ("reference", "enforcement_and_scaling.md"),
             ("reference", "foundry_implementation.md"),
+            ("reference", "demo_implementation.md"),
         ):
             with self.subTest(name=name):
                 self.assertTrue((SKILL_ROOT / folder / name).is_file())
@@ -85,6 +86,30 @@ class SkillPackageTests(unittest.TestCase):
         self.assertEqual(guide.count("### Model routing for agent requests\n"), 1)
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn(f"]({guide_path.as_posix()}#{anchor})", skill)
+
+    def test_demo_implementation_is_discoverable(self) -> None:
+        guide_path = Path("reference") / "demo_implementation.md"
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn(f"]({guide_path.as_posix()})", skill)
+        guide = (SKILL_ROOT / guide_path).read_text(encoding="utf-8")
+        steps = [int(step) for step in re.findall(r"^## (\d+)\.", guide, re.MULTILINE)]
+        self.assertTrue(steps)
+        self.assertEqual(steps, list(range(1, len(steps) + 1)))
+
+    def test_agent_memory_guidance_is_discoverable(self) -> None:
+        guide_path = Path("reference") / "foundry_implementation.md"
+        guide = (SKILL_ROOT / guide_path).read_text(encoding="utf-8")
+        self.assertEqual(guide.count("### Cosmos DB memory for every AI agent\n"), 1)
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        anchor = "cosmos-db-memory-for-every-ai-agent"
+        self.assertIn(f"]({guide_path.as_posix()}#{anchor})", skill)
+        demo = (SKILL_ROOT / "reference" / "demo_implementation.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(f"](foundry_implementation.md#{anchor})", demo)
+        self.assertEqual(
+            demo.count("### Private network and managed identity for each service\n"), 1
+        )
 
     def test_python_modules_parse(self) -> None:
         for source in (SKILL_ROOT / "scripts").glob("*.py"):

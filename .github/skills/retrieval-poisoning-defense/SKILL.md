@@ -71,6 +71,18 @@ and write-gate authority separate. Confirm the approved model pool, tool support
 inference residency, and workload evaluation before enabling routing. A private
 endpoint does not guarantee single-region inference.
 
+For a presentation or runnable-demo design, follow the
+[demonstration implementation and Azure deployment guide](reference/demo_implementation.md).
+It specifies a UI/API, durable local gate, optional live integrations, and staged
+cloud deployment. The runnable demo today is the offline smoke scenario; the
+guide does not supply or deploy those application/infrastructure components.
+
+For persistent agent context, follow the guide's
+[Cosmos DB memory contract](reference/foundry_implementation.md#cosmos-db-memory-for-every-ai-agent).
+Every registered AI agent needs scoped recall and gated memory proposals; shared
+storage is not shared authority. Keep recalled memory untrusted and separate
+from Foundry-managed state, trusted references, and publication decisions.
+
 | Mode | Processing and client contract | Protection boundary |
 | --- | --- | --- |
 | `post_write_audit` | Audit committed versions from approved change capture or periodic reads; persist flags and notify reviewers asynchronously. | Detective only: data can be consumed before it is flagged. Do not claim the write was prevented. |

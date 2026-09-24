@@ -110,6 +110,20 @@ failure scenarios. Gateways, queues, pools, status endpoints, and distributed
 audit storage described there are integration work, not runtime features already
 provided by this repository.
 
+## Making the repository demonstration-ready
+
+The [demonstration implementation and Azure deployment guide](.github/skills/retrieval-poisoning-defense/reference/demo_implementation.md)
+specifies an offline-first Streamlit UI, FastAPI backend, durable write lifecycle,
+shared scenario runner/headless client, and optional live Foundry/MCP/A2A
+integration. It includes a presenter walkthrough, readiness criteria, and a
+staged Azure Container Apps deployment runbook.
+
+**The detectors and offline smoke scenario exist; the demo application and
+deployment assets do not yet.** The guide identifies the components to build
+before its conditional Azure deployment steps can be used. It keeps offline,
+replay, and live results distinct and does not claim that `azd up` works against
+this repository today.
+
 ## Implementing on Microsoft Foundry
 
 The [Foundry implementation and private-network guide](.github/skills/retrieval-poisoning-defense/reference/foundry_implementation.md)
@@ -117,6 +131,20 @@ describes the service footprint, build sequence, MCP/A2A boundaries, private
 networking and DNS, managed-identity permissions, and acceptance/cutover checks.
 It is a deployment design reference, not provisioned infrastructure or a claim
 that every private-network combination has been validated in a live environment.
+
+### Cosmos DB memory for all AI agents
+
+The [agent-memory design](.github/skills/retrieval-poisoning-defense/reference/foundry_implementation.md#cosmos-db-memory-for-every-ai-agent)
+uses Cosmos DB for NoSQL for every registered agent's session and long-term
+memory, with explicitly authorized shared-case memory. It specifies scoped recall,
+gated memory writes, provenance, concurrency, expiry, and revocation. Custom
+memory remains separate from Foundry-managed state and gate decisions; agents
+do not receive unrestricted access to each other's history or Cosmos write keys.
+
+The [demo deployment guide](.github/skills/retrieval-poisoning-defense/reference/demo_implementation.md#private-network-and-managed-identity-for-each-service)
+includes a private-network and managed-identity checklist for each service.
+These are implementation requirements; the custom memory adapter, cloud network,
+and role assignments are not deployed by this repository.
 
 ### Complexity-based model routing
 
