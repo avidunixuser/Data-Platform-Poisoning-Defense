@@ -118,6 +118,25 @@ networking and DNS, managed-identity permissions, and acceptance/cutover checks.
 It is a deployment design reference, not provisioned infrastructure or a claim
 that every private-network combination has been validated in a live environment.
 
+### Complexity-based model routing
+
+The guide includes [Model Router implementation guidance](.github/skills/retrieval-poisoning-defense/reference/foundry_implementation.md#model-routing-for-agent-requests)
+for Foundry agents that need different LLM capabilities across prompts. It covers
+router deployment, approved model subsets, Balanced/Cost/Quality modes, agent
+configuration, private access, and quality/cost/latency evaluation.
+
+Routing applies to **agent chat and investigation reasoning**, not the Python
+detectors or `FOUNDRY_EMBEDDINGS_MODEL`. Embedding spaces and calibrated references
+remain consistent, and the trusted write gate retains publication authority.
+Model selection is predictive rather than a guaranteed prompt-to-model rule.
+Use a direct deployment where a particular model is required.
+
+A router is another Foundry model deployment, not another service family.
+Its Global Standard/Data Zone Standard processing boundaries must be approved
+separately: private connectivity and single-region application infrastructure do
+not guarantee single-region inference. This repository documents integration;
+it does not provision a router or implement a live chat-routing client.
+
 ## Use the skill
 
 Copilot discovers the repository's `SKILL.md` and loads it when relevant. For

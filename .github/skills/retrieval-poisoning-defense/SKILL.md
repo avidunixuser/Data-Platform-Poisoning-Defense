@@ -64,6 +64,13 @@ For Microsoft Foundry deployment planning, read the
 for service dependencies, MCP/A2A integration, network lockdown, and identity
 boundaries. These instructions do not authorize deployment or role changes.
 
+For complexity-based model selection, follow the guide's
+[model-routing instructions](reference/foundry_implementation.md#model-routing-for-agent-requests).
+Route agent chat/reasoning only; keep embedding deployments, numerical detectors,
+and write-gate authority separate. Confirm the approved model pool, tool support,
+inference residency, and workload evaluation before enabling routing. A private
+endpoint does not guarantee single-region inference.
+
 | Mode | Processing and client contract | Protection boundary |
 | --- | --- | --- |
 | `post_write_audit` | Audit committed versions from approved change capture or periodic reads; persist flags and notify reviewers asynchronously. | Detective only: data can be consumed before it is flagged. Do not claim the write was prevented. |

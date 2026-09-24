@@ -78,6 +78,14 @@ class SkillPackageTests(unittest.TestCase):
         self.assertTrue(steps)
         self.assertEqual(steps, list(range(1, len(steps) + 1)))
 
+    def test_model_routing_guidance_is_discoverable(self) -> None:
+        guide_path = Path("reference") / "foundry_implementation.md"
+        anchor = "model-routing-for-agent-requests"
+        guide = (SKILL_ROOT / guide_path).read_text(encoding="utf-8")
+        self.assertEqual(guide.count("### Model routing for agent requests\n"), 1)
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn(f"]({guide_path.as_posix()}#{anchor})", skill)
+
     def test_python_modules_parse(self) -> None:
         for source in (SKILL_ROOT / "scripts").glob("*.py"):
             with self.subTest(source=source.name):
