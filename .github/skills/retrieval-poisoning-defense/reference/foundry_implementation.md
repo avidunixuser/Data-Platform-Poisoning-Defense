@@ -1,15 +1,18 @@
 # Microsoft Foundry implementation and private-network guide
 
-**Architecture guidance; documentation reviewed 2026-09-21.** This is not
-deployable IaC or evidence of a live network/RBAC validation. The repository
+**Architecture guidance; networking/identity documentation reviewed 2026-09-21;
+model-routing documentation reviewed 2026-09-24.** This is not deployable IaC or
+evidence of a live network/RBAC/model-router validation. The repository
 contains detectors and instructions, not the API, MCP server, queue processors,
 publication service, or Azure infrastructure described below. Obtain approval
 for the actual subscription, region, topology, permissions, and rollout before
 creating resources or changing production access.
 
-This guide targets an Azure public-cloud, single-region implementation of
-`async_gate`: acknowledge durable intake, validate in background workers, and
-publish only an approved mutation. See [enforcement and scaling](enforcement_and_scaling.md)
+This guide targets an Azure public-cloud, single-region application-infrastructure
+layout for `async_gate`: acknowledge durable intake, validate in background
+workers, and publish only an approved mutation. That layout does not guarantee
+single-region model inference; see [model-routing residency](#model-routing-for-agent-requests).
+See [enforcement and scaling](enforcement_and_scaling.md)
 for the post-write and inline alternatives, state machine, and failure handling.
 Do not silently substitute post-write detection for pre-publication enforcement.
 
@@ -40,7 +43,7 @@ It is not ten resource instances or a complete private-network bill of materials
 
 | # | Service family | Implementation responsibility |
 | --- | --- | --- |
-| 1 | Microsoft Foundry | Proposing/investigating agents, model and embedding deployments, project connections, and optional toolboxes/A2A endpoints |
+| 1 | Microsoft Foundry | Proposing/investigating agents, model and embedding deployments, optional model-router chat deployments, project connections, and optional toolboxes/A2A endpoints |
 | 2 | Azure Container Apps | Separate intake/status/MCP, validation-worker, and trusted-publisher workloads and identities |
 | 3 | Azure Container Registry | Versioned images for those workloads; private image-pull and build paths |
 | 4 | Azure API Management | Governed API entry point and, where the selected route supports it, REST-to-MCP exposure |
@@ -477,6 +480,166 @@ versioned configuration, and graceful shutdown. Stop taking new work before
 shutdown; finish or relinquish leases safely. Share durable state, not a local
 JSONL file: `LineageAuditor.record_batch` is not a distributed transaction ledger.
 
+### Model routing for agent requests
+
+Use the managed **Model Router** when the agent handles prompts with different
+reasoning and tool-orchestration demands. It analyzes the full request, including
+system instructions, user messages, tool definitions, and conversation history,
+and predicts an eligible model under the configured routing policy. This is
+managed ML-based selection, not a prompt-length rule or a custom classifier that
+this repository trains.
+
+```text
+Agent reasoning request -> model-router deployment -> selected eligible LLM
+                        -> authorized MCP tools / optional A2A delegation
+                        -> detector evidence -> agent explanation
+
+Mutation publication -> trusted validation/authorization gate -> target write
+                       (not controlled by model selection)
+```
+
+Route **chat/reasoning requests only**. Mahalanobis, k-NN, SVD, drift, and regex
+checks remain Python computations. `FOUNDRY_EMBEDDINGS_MODEL` and
+`FOUNDRY_EMBEDDINGS_ENDPOINT` remain the explicit embedding configuration for
+semantic screening. Do not put a router deployment in those variables or switch
+embedding spaces per request: reference vectors, cached seeds, dimensions, and
+calibrated thresholds depend on a consistent embedding model/version.
+Any intentional embedding migration needs compatible re-embedding and calibration.
+
+#### Deploy and connect the router
+
+1. **Confirm eligibility and governance.** Check the currently supported router
+   version, deployment region/type, quota, model providers, and agent/tool/API
+   combination. Approve data handling for the full request and every eligible
+   model, including fallback models. Complexity estimation does not determine
+   business risk or data-sharing authorization.
+2. **Deploy the router in the approved Foundry account.** This adds a model
+   deployment and capacity/billing configuration, not another Azure service
+   family or a custom routing microservice. Current guidance lists version
+   `2025-11-18` as active. Most supported underlying models do not need separate
+   deployments; Claude models currently require prior deployments in the same
+   account with the matching SKU. Verify the current compatibility list rather
+   than assuming the router can use arbitrary endpoints or models.
+3. **Set an explicit allowed model subset and routing mode.** Do not depend on
+   the default full pool for a restricted workload. A subset needs at least one
+   model; select at least two eligible models if fallback is required. An empty
+   selection can restore the default pool, so reject empty/invalid configuration
+   in the deployment process instead of treating it as deny-all.
+4. **Select the router deployment as the agent's model.** Current documentation
+   supports Foundry Agent Service, Responses, and Chat Completions. The agent or
+   inference request references the router's deployment name, not a particular
+   underlying LLM. A setting such as `FOUNDRY_CHAT_DEPLOYMENT` could carry that
+   name in a future agent application; it is a proposed application setting,
+   not an environment variable read by the existing detector scripts.
+5. **Preserve tools, permissions, and guardrails.** Keep approved system
+   instructions, output schemas, content-safety policy, tool allowlists, and
+   gate permissions. Validate required MCP/tool capabilities across the allowed
+   pool; eligibility can reduce the models available for a particular request.
+   Each A2A peer has its own model configuration and authorization boundary;
+   a caller's router configuration does not propagate automatically.
+6. **Promote only after workload evaluation.** Compare with an approved direct
+   model, use a limited rollout, and retain a documented rollback or direct-model
+   path for workloads that require deterministic model selection. Changes to
+   mode/subset can take up to five minutes to apply; verify the active
+   configuration before attributing results to a change.
+
+The repo does not currently deploy a chat application or router, so the steps
+above are integration work, not a new runtime feature or authorization to create
+resources. Keep deployment/IAM administration separate from agent runtime.
+
+#### Choose policy by workload, not by an untrusted prompt instruction
+
+| Mode or path | Suggested use in this system | Boundary |
+| --- | --- | --- |
+| Balanced | Start here for mixed-complexity triage, status explanations, and investigation conversations | Trades off predicted quality and cost within the approved model subset; no guaranteed per-prompt model mapping |
+| Cost | Consider for evaluated, low-risk, high-volume summaries or basic lookups | Lower cost may reduce quality; never use a cheap completion to replace a mandatory detector or reviewer |
+| Quality | Consider for difficult lineage investigations and evidence synthesis | Favors predicted quality, not proof of correctness, malicious intent, or permission to publish |
+| Approved direct deployment | Workflows requiring a specific model or failing router acceptance criteria | Use explicit application policy; do not rely on the router to implement a strict "complexity level -> exact model" rule |
+
+One router deployment can handle a mixed workload. Separate router deployments
+per agent are optional when different model subsets or policies are needed.
+Their quota, cost, and permission configuration must be accounted for separately.
+Do not let retrieved content or a client-supplied "use model X" instruction alter
+the approved pool, routing mode, or publication policy.
+
+The active router version receives model/feature updates in place. Pinning
+`2025-11-18` is not a guarantee that routing behavior never changes. Record the
+actual configured subset, underlying model versions, mode, and change history;
+custom subsets exclude newly introduced models until explicitly added.
+Reevaluate on router/provider changes and retirements.
+
+Check the smallest context window and required capabilities in the selected
+pool. Do not depend on an oversized request happening to reach a larger model;
+reject/rescope it or use an approved large-context subset without silently
+dropping audit evidence. Agent Service routes requests independently across
+turns. The Chat Completions session-affinity feature is currently preview and
+does not configure affinity for Agent Service sessions. It is not a substitute
+for evaluating multi-turn consistency.
+
+#### Preserve private access and resolve inference residency
+
+Keep the existing managed-identity and private-endpoint design. Verify the
+actual caller principal, endpoint audience, and required inference data action
+for the selected account/API; a project role is not universal provider access.
+If the router uses a different account/hostname, configure its private DNS,
+endpoint, and permissions explicitly. Exercise the real agent-to-router-to-tool
+route with public data access disabled rather than inferring support from a
+successful standalone model request. Never use a public fallback for a private
+connectivity failure.
+
+The currently documented router deployment types are **Global Standard** and
+**Data Zone Standard**. Global processing can occur across Azure regions;
+Data Zone processing stays within the selected Microsoft-defined zone, not
+necessarily the account's region. A deployment's location and a private endpoint
+do not constrain inference to that region or move model hosting into the
+application VNet. If strict single-region processing is required, resolve that
+requirement against current service guarantees before enabling routing; do not
+describe this infrastructure layout as proof of inference residency.
+
+Automatic model failover stays within a configured subset; effective fallback
+also depends on model availability and request compatibility. Do not broaden
+the pool, credentials, network paths, or permissions after an error.
+If an investigation requires a model result and all approved options fail,
+record the failure and keep the case unresolved/held. Neither a router error nor
+a high-capability response can override the trusted publisher's checks.
+
+#### Evaluate, observe, and roll back
+
+Use an approved representative dataset and multi-turn traces, keeping system
+instructions, tool definitions, evidence, and output limits consistent with the
+fixed-model baseline. Measure outcomes by workload category, not just averages.
+Offline package tests do not establish live routing quality or private access.
+
+| Scenario | Acceptance evidence |
+| --- | --- |
+| Simple requests versus complex investigations | Adequate factual/evidence quality at the measured cost and latency; no assumption that every short prompt uses the cheapest model |
+| Long context and structured tool calls | Required context fits the eligible pool; valid arguments/output schemas and intact source/version associations |
+| Multi-turn, MCP, and optional A2A flows | Correct tool authorization and evidence handling across model changes; no peer/task completion mistaken for a write approval |
+| Quota, timeout, and eligible-model failures | Bounded retries, explicit failures, and fallback only within policy; idempotent tools prevent duplicate side effects |
+| Private identity/network path | Expected private connectivity and correct caller permissions, plus denied public/wrong-identity alternatives |
+| Detector and gate independence | Router choices do not change embedding baselines, numerical results for fixed inputs, mandatory checks, or publication authority |
+| Rollout and rollback | Approved quality, cost, and p95/p99 latency criteria; an available authorized direct-model or prior-configuration path, not a silent fail-open fallback |
+
+Log operation/trace IDs, actual serving model from the supported response's
+`model` field, router deployment/configuration, token usage, latency, errors,
+and estimated versus billed cost. Do not log raw sensitive prompts/documents
+merely to explain a routing decision. Underlying model distribution and fallback
+can change cost and latency; no savings percentage or tail-latency guarantee is
+established by this guide.
+
+Detailed `model_selection_details`/routing traces and session-affinity metadata
+are currently an optional Chat Completions preview. Parse them defensively and
+do not assume they exist on Agent Service or Responses outputs. Missing metadata
+means the detail is unavailable, not evidence that no fallback occurred.
+
+Sources: [router concepts and constraints](https://learn.microsoft.com/azure/foundry/openai/concepts/model-router),
+[routing behavior](https://learn.microsoft.com/azure/foundry/openai/concepts/model-router-how-it-works),
+[deployment and configuration](https://learn.microsoft.com/azure/foundry/openai/how-to/model-router),
+[Agent Service integration](https://learn.microsoft.com/azure/foundry/openai/how-to/model-router-agents),
+[deployment types and residency](https://learn.microsoft.com/azure/foundry/foundry-models/concepts/deployment-types),
+[workload evaluation](https://learn.microsoft.com/azure/foundry/openai/how-to/evaluate-model-router),
+and [routing observability](https://learn.microsoft.com/azure/foundry/openai/how-to/monitor-model-router).
+
 ## 7. Expose MCP tools and add A2A selectively
 
 Keep skill instructions in the approved agent configuration/catalog. MCP exposes
@@ -575,6 +738,7 @@ expected outcome, and actual outcome without logging credentials or raw data.
 | Asynchronous recovery | Durable acceptance survives restart; duplicates, stale versions, expired leases, and commit-before-ack crashes do not create duplicate or unapproved effects. |
 | Network failure | DNS, private endpoint, route, or embedding connectivity failures produce explicit pending/held/failed or reconciling status, not fail-open publication. |
 | Protocol route | Real Foundry-to-MCP and any enabled A2A discovery/invocation succeed privately with scoped authorization; unsupported paths remain disabled. |
+| Optional model router | Approved model subset, inference residency, real agent/tool compatibility, and workload-level quality/cost/latency criteria pass; embedding and publication controls remain independent. |
 | Operations | Private image pull, deployment, identity token renewal, telemetry, alert delivery, and the approved recovery path continue to work after public access is disabled. |
 
 After positive and negative evidence is approved, complete the public-access
